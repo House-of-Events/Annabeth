@@ -1,5 +1,7 @@
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
 const sqsClient = new SQSClient({ region: 'us-west-2' });
+import dotenv from 'dotenv';
+dotenv.config();
 const queueUrl = process.env.SQS_QUEUE_URL;
 
 export const postToQueue = async (fixture) => {
@@ -17,7 +19,6 @@ export const postToQueue = async (fixture) => {
 
   try {
     await sqsClient.send(new SendMessageCommand(params));
-    console.log(`Fixture {${fixture.id}} added to queue`);
   } catch (error) {
     console.error('Failed to send message to SQS:', error);
     throw error;

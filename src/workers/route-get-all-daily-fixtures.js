@@ -31,32 +31,30 @@ const db = knex({
 });
 
 async function processAllDailyFixtures() {
-  console.log('Processing all daily fixtures');
+  console.log("Processing fixtures for next 1 hour")
   try {
-    // Calculate time range (1 hour ago to 12 hours from now)
+    // Calculate time range (now to 1 hour from now) in UTC
     const now = new Date();
-    const oneHourAgo = new Date(now.getTime() - 1 * 60 * 60 * 1000);
-    const twelveHoursFromNow = new Date(now.getTime() + 12 * 60 * 60 * 1000);
+    const oneHourFromNow = new Date(now.getTime() + (1 * 60 * 60 * 1000));
 
-    console.log(
-      `Looking for fixtures between ${oneHourAgo.toISOString()} and ${twelveHoursFromNow.toISOString()}`
-    );
+    console.log(`Current time (UTC): ${now.toISOString()}`);
+    console.log(`Looking for fixtures between ${now.toISOString()} and ${oneHourFromNow.toISOString()}`);
 
     // Query both tables in parallel
     const [soccerFixtures, f1Fixtures] = await Promise.all([
       // Query soccer_2025_fixtures table
       db('soccer_2025_fixtures')
         .select('*')
-        .where('date_time', '>=', oneHourAgo)
-        .where('date_time', '<=', twelveHoursFromNow)
+        .where('date_time', '>=', now)
+        .where('date_time', '<=', oneHourFromNow)
         .where('processed', false)
         .orderBy('date_time', 'asc'),
 
       // Query f1_2025_fixtures table
       db('f1_2025_fixtures')
         .select('*')
-        .where('date_time', '>=', oneHourAgo)
-        .where('date_time', '<=', twelveHoursFromNow)
+        .where('date_time', '>=', now)
+        .where('date_time', '<=', oneHourFromNow)
         .where('processed', false)
         .orderBy('date_time', 'asc'),
     ]);
@@ -85,9 +83,9 @@ async function processAllDailyFixtures() {
       await markFixturesAsProcessed(soccerFixtures, f1Fixtures);
     }
 
-    console.log('Daily fixtures processing completed successfully');
+    console.log('Fixtures processing completed successfully');
   } catch (error) {
-    console.error('Error processing daily fixtures:', error);
+    console.error('Error processing fixtures:', error);
     throw error;
   } finally {
     // Close database connection
@@ -110,7 +108,7 @@ async function processFixture(fixture, type) {
 
     // Send to SQS queue using AWS SDK v3
     const command = new SendMessageCommand({
-      QueueUrl: config.SQS_GET_ALL_FIXTURES_FROM_DB_DAILY_QUEUE_URL,
+      QueueUrl: config.SQS_FIXTURES_DAILY_QUEUE_URL,
       MessageBody: JSON.stringify(messageBody),
     });
 

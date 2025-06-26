@@ -1,10 +1,13 @@
 # Use Node.js 18 Alpine for smaller image size
 FROM node:18-alpine
 
-# Install Chamber for secrets management
-RUN apk add --no-cache curl bash
-RUN curl -L https://github.com/segmentio/chamber/releases/download/v2.12.0/chamber-v2.12.0-linux-amd64 -o /usr/local/bin/chamber && \
-    chmod +x /usr/local/bin/chamber
+# Install Chamber (detect architecture automatically)
+RUN ARCH=$(uname -m) && \
+    if [ "$ARCH" = "x86_64" ]; then ARCH="amd64"; fi && \
+    if [ "$ARCH" = "aarch64" ]; then ARCH="arm64"; fi && \
+    wget -O /usr/bin/chamber https://github.com/segmentio/chamber/releases/download/v2.13.1/chamber-v2.13.1-linux-${ARCH} && \
+    chmod +x /usr/bin/chamber
+
 
 # Set working directory
 WORKDIR /app

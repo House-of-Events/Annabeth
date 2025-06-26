@@ -7,7 +7,6 @@ function getChamberSecrets(service) {
       'AWS_ACCESS_KEY_ID',
       'AWS_SECRET_ACCESS_KEY', 
       'sqs_get_all_fixtures_from_db_daily_queue_url',
-      'sqs_fixtures_daily_queue_url',
       'db_host',
       'db_port',
       'db_name',
@@ -38,8 +37,7 @@ export default {
     DB_USER: appSecrets.db_username || 'postgres',
     DB_PASSWORD: appSecrets.db_password || 'postgres',
     SQS_GET_ALL_FIXTURES_FROM_DB_DAILY_QUEUE_URL: appSecrets.sqs_get_all_fixtures_from_db_daily_queue_url,
-    SQS_FIXTURES_DAILY_QUEUE_URL: appSecrets.sqs_fixtures_daily_queue_url,
     
-    // SSL Configuration - Enable SSL for AWS RDS
-    SHADOW_DB_SSL: process.env.SHADOW_DB_SSL !== 'false',
+    // SSL Configuration
+    SHADOW_DB_SSL: process.env.SHADOW_DB_SSL === 'true' || false,
 };

@@ -40,47 +40,43 @@ async function processAllDailyFixtures() {
     console.log(`Current time (UTC): ${now.toISOString()}`);
     console.log(`Looking for fixtures between ${now.toISOString()} and ${oneHourFromNow.toISOString()}`);
 
-    // Query both tables in parallel
-    const [soccerFixtures, f1Fixtures] = await Promise.all([
-      // Query soccer_2025_fixtures table
-      db('soccer_2025_fixtures')
-        .select('*')
-        .where('date_time', '>=', now)
-        .where('date_time', '<=', oneHourFromNow)
-        .where('processed', false)
-        .orderBy('date_time', 'asc'),
+    // Query the unified fixtures table for unprocessed fixtures in the time range
+    const fixtures = await db('fixtures')
+      .select('*')
+      .where('processed', false)
+      .where('date_deleted', null)
+      .where('date_time', '>=', now)
+      .where('date_time', '<=', oneHourFromNow)
+      .orderBy('date_time', 'asc');
 
-      // Query f1_2025_fixtures table
-      db('f1_2025_fixtures')
-        .select('*')
-        .where('date_time', '>=', now)
-        .where('date_time', '<=', oneHourFromNow)
-        .where('processed', false)
-        .orderBy('date_time', 'asc'),
-    ]);
+    console.log(`Found ${fixtures.length} fixtures to process`);
 
-    console.log(`Found ${soccerFixtures.length} soccer fixtures to process`);
-    console.log(`Found ${f1Fixtures.length} F1 fixtures to process`);
-
-    // Process soccer fixtures
-    if (soccerFixtures.length > 0) {
-      console.log('Processing soccer fixtures...');
-      for (const fixture of soccerFixtures) {
-        await processFixture(fixture, 'soccer');
+    // Group fixtures by sport type for logging
+    const fixturesBySport = fixtures.reduce((acc, fixture) => {
+      const sportType = fixture.sport_type;
+      if (!acc[sportType]) {
+        acc[sportType] = [];
       }
-    }
+      acc[sportType].push(fixture);
+      return acc;
+    }, {});
 
-    // Process F1 fixtures
-    if (f1Fixtures.length > 0) {
-      console.log('Processing F1 fixtures...');
-      for (const fixture of f1Fixtures) {
-        await processFixture(fixture, 'f1');
+    // Log counts by sport type
+    Object.entries(fixturesBySport).forEach(([sportType, sportFixtures]) => {
+      console.log(`Found ${sportFixtures.length} ${sportType} fixtures to process`);
+    });
+
+    // Process all fixtures
+    if (fixtures.length > 0) {
+      console.log('Processing fixtures...');
+      for (const fixture of fixtures) {
+        await processFixture(fixture);
       }
     }
 
     // Mark fixtures as processed
-    if (soccerFixtures.length > 0 || f1Fixtures.length > 0) {
-      await markFixturesAsProcessed(soccerFixtures, f1Fixtures);
+    if (fixtures.length > 0) {
+      await markFixturesAsProcessed(fixtures);
     }
 
     console.log('Fixtures processing completed successfully');
@@ -93,7 +89,7 @@ async function processAllDailyFixtures() {
   }
 }
 
-async function processFixture(fixture, type) {
+async function processFixture(fixture) {
   try {
     // Initialize SQS client
     const sqsClient = newSQSClient();
@@ -101,8 +97,8 @@ async function processFixture(fixture, type) {
     // Send fixture to SQS queue for further processing
     const messageBody = {
       fixture_id: fixture.id,
-      fixture_type: type,
-      fixture_data: fixture,
+      fixture_type: fixture.sport_type,
+      fixture_data: fixture.fixture_data,
       processed_at: new Date().toISOString(),
     };
 
@@ -114,32 +110,20 @@ async function processFixture(fixture, type) {
 
     await sqsClient.send(command);
 
-    console.log(`Successfully queued ${type} fixture ${fixture.id}`);
+    console.log(`Successfully queued ${fixture.sport_type} fixture ${fixture.id}`);
   } catch (error) {
-    console.error(`Error processing ${type} fixture ${fixture.id}:`, error);
+    console.error(`Error processing ${fixture.sport_type} fixture ${fixture.id}:`, error);
     throw error;
   }
 }
 
-async function markFixturesAsProcessed(soccerFixtures, f1Fixtures) {
+async function markFixturesAsProcessed(fixtures) {
   try {
-    // Mark soccer fixtures as processed
-    if (soccerFixtures.length > 0) {
-      const soccerIds = soccerFixtures.map((f) => f.id);
-      await db('soccer_2025_fixtures').whereIn('id', soccerIds).update({
-        processed: true,
-        date_processed: new Date(),
-      });
-    }
-
-    // Mark F1 fixtures as processed
-    if (f1Fixtures.length > 0) {
-      const f1Ids = f1Fixtures.map((f) => f.id);
-      await db('f1_2025_fixtures').whereIn('id', f1Ids).update({
-        processed: true,
-        date_processed: new Date(),
-      });
-    }
+    const fixtureIds = fixtures.map((f) => f.id);
+    await db('fixtures').whereIn('id', fixtureIds).update({
+      processed: true,
+      date_processed: new Date(),
+    });
   } catch (error) {
     console.error('Error marking fixtures as processed:', error);
     throw error;

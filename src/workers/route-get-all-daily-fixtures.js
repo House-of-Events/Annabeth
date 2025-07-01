@@ -99,6 +99,8 @@ async function processFixture(fixture) {
       fixture_id: fixture.id,
       fixture_type: fixture.sport_type,
       fixture_data: fixture.fixture_data,
+      match_id: fixture.match_id,
+      date_time: fixture.date_time,
       processed_at: new Date().toISOString(),
     };
 

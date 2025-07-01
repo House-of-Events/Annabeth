@@ -15,6 +15,7 @@ import { SendMessageCommand } from '@aws-sdk/client-sqs';
 //     sport_type VARCHAR(50) NOT NULL,
 //     fixture_data JSONB NOT NULL,
 //     date_time TIMESTAMP WITH TIME ZONE NOT NULL,
+//     match_id VARCHAR(255) NOT NULL,
 //     processed BOOLEAN DEFAULT FALSE,
 //     date_processed TIMESTAMP WITH TIME ZONE,
 //     date_deleted TIMESTAMP WITH TIME ZONE,
@@ -23,44 +24,50 @@ import { SendMessageCommand } from '@aws-sdk/client-sqs';
 // );
 
 // Insert some data into the fixtures table
-// INSERT INTO fixtures (sport_type, fixture_data, date_time, processed) VALUES
+// INSERT INTO fixtures (sport_type, fixture_data, date_time, match_id, processed) VALUES
 // (
 //     'football',
 //     '{"home_team": "Arsenal", "away_team": "Chelsea", "competition": "Premier League", "venue": "Emirates Stadium"}',
 //     NOW() + INTERVAL '30 minutes',
+//     'soc_ars_che_02042000',
 //     false
 // ),
 // (
 //     'basketball',
 //     '{"home_team": "Lakers", "away_team": "Warriors", "competition": "NBA", "venue": "Crypto.com Arena"}',
 //     NOW() + INTERVAL '45 minutes',
+//     'soc_lak_war_02042000',
 //     false
 // ),
 // (
 //     'tennis',
 //     '{"player1": "Djokovic", "player2": "Nadal", "competition": "Wimbledon", "court": "Centre Court"}',
 //     NOW() + INTERVAL '15 minutes',
+//     'ten_djn_nar_02042000',
 //     false
 // ),
 // (
 //     'cricket',
 //     '{"home_team": "England", "away_team": "Australia", "competition": "Ashes", "venue": "Lords"}',
 //     NOW() + INTERVAL '20 minutes',
+//     'cri_eng_aus_02042000',
 //     false
 // );
 
 // -- Fixtures outside the time range (should not be processed)
-// INSERT INTO fixtures (sport_type, fixture_data, date_time, processed) VALUES
+// INSERT INTO fixtures (sport_type, fixture_data, date_time, match_id, processed) VALUES
 // (
 //     'football',
 //     '{"home_team": "Manchester United", "away_team": "Liverpool", "competition": "Premier League", "venue": "Old Trafford"}',
 //     NOW() + INTERVAL '2 hours',
+//     'soc_man_liv_02042000',
 //     false
 // ),
 // (
 //     'basketball',
 //     '{"home_team": "Celtics", "away_team": "Heat", "competition": "NBA", "venue": "TD Garden"}',
 //     NOW() - INTERVAL '1 hour',
+//     'bas_cel_hea_02042000',
 //     false
 // );
 
@@ -149,7 +156,9 @@ async function processFixture(fixture) {
     // Send fixture to SQS queue for further processing
     const messageBody = {
       fixture_id: fixture.id,
+      match_id: fixture.match_id,
       fixture_type: fixture.sport_type,
+      date_time: fixture.date_time,
       fixture_data: fixture.fixture_data,
       processed_at: new Date().toISOString(),
     };

@@ -1,6 +1,7 @@
 import knex from 'knex';
 import knexConfig from '../../../../knexfile.js';
 import { SQSClient, SendMessageCommand } from '@aws-sdk/client-sqs';
+import logger from '../../../../lib/logger.js';
 // const database = knex(knexConfig.development);
 const sqsClient = new SQSClient({ region: 'us-west-2' });
 const queueUrl = process.env.SQS_QUEUE_URL;
@@ -9,7 +10,7 @@ const queueUrl = process.env.SQS_QUEUE_URL;
 
 export const findUpcomingFixtures = async (req, res) => {
   try {
-    console.log('In here');
+    logger.info('Processing findUpcomingFixtures request');
     const now = new Date();
     const currentTimePST = now.toLocaleString('en-US', {
       timeZone: 'America/Los_Angeles',
@@ -42,6 +43,12 @@ export const findUpcomingFixtures = async (req, res) => {
       },
     ];
 
+    logger.info('Processing upcoming fixtures', {
+      fixtureCount: upcomingFixtures.length,
+      currentTimePST,
+      oneHourFromNowPST,
+    });
+
     // Sent fixtures to SQS queue
     for (const fixture of upcomingFixtures) {
       const fixtureTime = new Date(fixture.date_time);
@@ -59,8 +66,18 @@ export const findUpcomingFixtures = async (req, res) => {
 
       try {
         await sqsClient.send(new SendMessageCommand(params));
+        logger.info('Successfully sent fixture to SQS', {
+          fixtureId: fixture.id,
+          matchId: fixture.match_id,
+          messageInformTime: messageInformTime.toISOString(),
+        });
       } catch (error) {
-        console.error('Failed to send message to SQS:', error);
+        logger.error('Failed to send message to SQS', {
+          error: error.message,
+          fixtureId: fixture.id,
+          matchId: fixture.match_id,
+          queueUrl,
+        });
         throw error;
       }
     }
@@ -74,9 +91,16 @@ export const findUpcomingFixtures = async (req, res) => {
 
     // // send notifcations to the users for the upcoming fixtures
 
+    logger.info('Successfully processed upcoming fixtures', {
+      fixtureCount: upcomingFixtures.length,
+    });
+
     return res.response(upcomingFixtures).code(200);
   } catch (error) {
-    console.error('Database query error:', error);
+    logger.error('Database query error in findUpcomingFixtures', {
+      error: error.message,
+      stack: error.stack,
+    });
     return res
       .response({
         error: 'Failed to retrieve upcoming fixtures',
@@ -91,6 +115,15 @@ export const postFixture = async (payload, res) => {
   const match_id = `${date}-${home_team}-${away_team}`;
   // date is in date type, time is in string type. We need to combine them to create a date_time field with timestamp type
   const date_time = `${date} ${time}:00+00`;
+
+  logger.info('Creating new fixture', {
+    homeTeam: home_team,
+    awayTeam: away_team,
+    venue,
+    date,
+    time,
+    matchId: match_id,
+  });
 
   await FixturesTable().insert({
     fixture_id: `fix_${Math.floor(Math.random() * 1000000)}`,
@@ -114,12 +147,24 @@ export const findAllFixtures = async (req, res) => {
     req.headers['x-env'] === 'production' ? 'production' : 'development';
   const database = knex(knexConfig[env]);
 
+  logger.info('Processing findAllFixtures request', { environment: env });
+
   try {
     const soccer_table = database('soccer_2024_pl_fixtures');
     const fixtures = await soccer_table.select('*');
+
+    logger.info('Successfully retrieved all fixtures', {
+      fixtureCount: fixtures.length,
+      environment: env,
+    });
+
     return res.response(fixtures).code(200);
   } catch (error) {
-    console.error('Database query error:', error);
+    logger.error('Database query error in findAllFixtures', {
+      error: error.message,
+      stack: error.stack,
+      environment: env,
+    });
     return res
       .response({
         error: 'Failed to retrieve upcoming fixtures',

@@ -2,6 +2,7 @@ import knex from 'knex';
 import config from '../../config/local.js';
 import newSQSClient from '../../lib/sqs-local.js';
 import { SendMessageCommand } from '@aws-sdk/client-sqs';
+import logger from '../../lib/logger.js';
 
 // Create SQS queue first 
 // aws --endpoint-url=http://localhost:4567 sqs create-queue \
@@ -90,14 +91,22 @@ const db = knex({
 });
 
 async function processAllDailyFixtures() {
-  console.log("Processing fixtures for next 1 hour (LOCAL MODE)")
+  const startTime = Date.now();
+  logger.info('Processing fixtures for next 1 hour', {
+    timestamp: new Date().toISOString(),
+    timeRange: '1 hour'
+  });
+
   try {
     // Calculate time range (now to 1 hour from now) in UTC
     const now = new Date();
     const oneHourFromNow = new Date(now.getTime() + (1 * 60 * 60 * 1000));
 
-    console.log(`Current time (UTC): ${now.toISOString()}`);
-    console.log(`Looking for fixtures between ${now.toISOString()} and ${oneHourFromNow.toISOString()}`);
+    logger.info('Processing time range', {
+      currentTime: now.toISOString(),
+      endTime: oneHourFromNow.toISOString(),
+      timeRangeMinutes: 60
+    });
 
     // Query the unified fixtures table for unprocessed fixtures in the time range
     const fixtures = await db('fixtures')
@@ -108,9 +117,12 @@ async function processAllDailyFixtures() {
       .where('date_time', '<=', oneHourFromNow)
       .orderBy('date_time', 'asc');
 
-    console.log(`Found ${fixtures.length} fixtures to process`);
+    logger.info('Found fixtures to process', {
+      totalFixtures: fixtures.length,
+      timeRange: `${now.toISOString()} to ${oneHourFromNow.toISOString()}`
+    });
 
-    // Group fixtures by sport type for logging
+    // Group fixtures by sport type for detailed logging
     const fixturesBySport = fixtures.reduce((acc, fixture) => {
       const sportType = fixture.sport_type;
       if (!acc[sportType]) {
@@ -120,35 +132,93 @@ async function processAllDailyFixtures() {
       return acc;
     }, {});
 
-    // Log counts by sport type
+    // Log detailed breakdown by sport type
     Object.entries(fixturesBySport).forEach(([sportType, sportFixtures]) => {
-      console.log(`Found ${sportFixtures.length} ${sportType} fixtures to process`);
+      logger.info('Sport fixtures breakdown', {
+        sportType,
+        count: sportFixtures.length,
+        fixtureIds: sportFixtures.map(f => f.id)
+      });
     });
 
     // Process all fixtures
     if (fixtures.length > 0) {
-      console.log('Processing fixtures...');
+      logger.info('Starting fixture processing', { totalFixtures: fixtures.length });
+      
+      const processingResults = {
+        successful: 0,
+        failed: 0,
+        errors: []
+      };
+
       for (const fixture of fixtures) {
-        await processFixture(fixture);
+        try {
+          await processFixture(fixture);
+          processingResults.successful++;
+        } catch (error) {
+          processingResults.failed++;
+          processingResults.errors.push({
+            fixtureId: fixture.id,
+            sportType: fixture.sport_type,
+            error: error.message
+          });
+          logger.error('Failed to process fixture', {
+            fixtureId: fixture.id,
+            sportType: fixture.sport_type,
+            error: error.message,
+            stack: error.stack
+          });
+        }
       }
-    }
 
-    // Mark fixtures as processed
-    if (fixtures.length > 0) {
+      logger.info('Fixture processing completed', {
+        successful: processingResults.successful,
+        failed: processingResults.failed,
+        totalProcessed: fixtures.length
+      });
+
+      // Mark fixtures as processed
       await markFixturesAsProcessed(fixtures);
+    } else {
+      logger.info('No fixtures found to process');
     }
 
-    console.log('Fixtures processing completed successfully');
+    const processingTime = Date.now() - startTime;
+    logger.info('Fixtures processing completed successfully', {
+      processingTimeMs: processingTime,
+      fixturesProcessed: fixtures.length
+    });
+
   } catch (error) {
-    console.error('Error processing fixtures:', error);
+    logger.error('Error processing fixtures', {
+      error: error.message,
+      stack: error.stack,
+      processingTimeMs: Date.now() - startTime
+    });
     throw error;
   } finally {
     // Close database connection
-    await db.destroy();
+    try {
+      await db.destroy();
+      logger.info('Database connection closed successfully');
+    } catch (error) {
+      logger.error('Error closing database connection', {
+        error: error.message
+      });
+    }
   }
 }
 
 async function processFixture(fixture) {
+  const startTime = Date.now();
+  
+  logger.info('Processing fixture', {
+    fixtureId: fixture.id,
+    sportType: fixture.sport_type,
+    matchId: fixture.match_id,
+    dateTime: fixture.date_time?.toISOString()
+  });
+
   try {
     // Initialize SQS client
     const sqsClient = newSQSClient();
@@ -171,23 +241,56 @@ async function processFixture(fixture) {
 
     await sqsClient.send(command);
 
-    console.log(`Successfully queued ${fixture.sport_type} fixture ${fixture.id}`);
+    const processingTime = Date.now() - startTime;
+    logger.info('Successfully queued fixture', {
+      fixtureId: fixture.id,
+      sportType: fixture.sport_type,
+      processingTimeMs: processingTime,
+      queueUrl: config.SQS_FIXTURES_DAILY_QUEUE_URL
+    });
+
   } catch (error) {
-    console.error(`Error processing ${fixture.sport_type} fixture ${fixture.id}:`, error);
+    const processingTime = Date.now() - startTime;
+    logger.error('Error processing fixture', {
+      fixtureId: fixture.id,
+      sportType: fixture.sport_type,
+      error: error.message,
+      processingTimeMs: processingTime,
+      queueUrl: config.SQS_FIXTURES_DAILY_QUEUE_URL
+    });
     throw error;
   }
 }
 
 async function markFixturesAsProcessed(fixtures) {
+  const startTime = Date.now();
+  
+  logger.info('Marking fixtures as processed', {
+    fixtureCount: fixtures.length,
+    fixtureIds: fixtures.map(f => f.id)
+  });
+
   try {
     const fixtureIds = fixtures.map((f) => f.id);
-    await db('fixtures').whereIn('id', fixtureIds).update({
+    const result = await db('fixtures').whereIn('id', fixtureIds).update({
       processed: true,
       date_processed: new Date(),
     });
-    console.log(`Marked ${fixtures.length} fixtures as processed`);
+
+    const processingTime = Date.now() - startTime;
+    logger.info('Successfully marked fixtures as processed', {
+      updatedCount: result,
+      fixtureCount: fixtures.length,
+      processingTimeMs: processingTime
+    });
+
   } catch (error) {
-    console.error('Error marking fixtures as processed:', error);
+    const processingTime = Date.now() - startTime;
+    logger.error('Error marking fixtures as processed', {
+      error: error.message,
+      fixtureCount: fixtures.length,
+      processingTimeMs: processingTime
+    });
     throw error;
   }
 }
@@ -195,10 +298,13 @@ async function markFixturesAsProcessed(fixtures) {
 // Run the script
 processAllDailyFixtures()
   .then(() => {
-    console.log('Script completed successfully');
+    logger.info('Script completed successfully');
     process.exit(0);
   })
   .catch((error) => {
-    console.error('Script failed:', error);
+    logger.error('Script failed', {
+      error: error.message,
+      stack: error.stack
+    });
     process.exit(1);
   }); 

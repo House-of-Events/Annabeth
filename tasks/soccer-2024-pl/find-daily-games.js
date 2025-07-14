@@ -2,6 +2,8 @@
 import knex from 'knex';
 import knexConfig from "./knexfile.js"
 import { findTodayFixtures, postToQueue } from "./src/plugins/features/soccer-2024-pl/helper.js";
+import logger from '../../lib/logger.js';
+
 // Create database connection with connection testing
 const createDatabaseConnection = async () => {    
     // Log connection details (excluding sensitive info)
@@ -15,10 +17,13 @@ const createDatabaseConnection = async () => {
     try {
         // Test the connection
         await db.raw('SELECT 1');
-        console.log('Database connection test successful');
+        logger.info('Database connection test successful');
         return db;
     } catch (error) {
-        console.error('Database connection test failed:', error);
+        logger.error('Database connection test failed', {
+            error: error.message,
+            stack: error.stack
+        });
         throw error;
     }
 };
@@ -36,44 +41,54 @@ const addToSQSQueue = async (fixtures) => {
     try {
         // Process fixtures in parallel for better performance
         await Promise.all(fixtures.map(fixture => postToQueue(fixture)));
+        logger.info('Successfully added fixtures to SQS queue', {
+            fixtureCount: fixtures.length
+        });
     } catch (err) {
-        console.error('Error posting to SQS:', err);
+        logger.error('Error posting to SQS', {
+            error: err.message,
+            stack: err.stack,
+            fixtureCount: fixtures.length
+        });
         throw err;
     }
 };
 
 export const handler = async (event, context) => {
     let database = null;
+    const startTime = Date.now();
     
     try {
-        console.log('Handler started');
+        logger.info('Handler started');
         context.callbackWaitsForEmptyEventLoop = false;
         
-        console.log('Attempting database connection...');
+        logger.info('Attempting database connection');
         database = await createDatabaseConnection();
-        console.log('Database connection established');
+        logger.info('Database connection established');
         
         const FixturesTable = () => database('soccer_2024_pl_fixtures');
         
         const currentDateInPST = getPSTDate();
-        console.log('Checking fixtures for date:', currentDateInPST);
+        logger.info('Checking fixtures for date', { currentDateInPST });
         
         const fixturesToday = await findTodayFixtures(currentDateInPST, FixturesTable);
-        console.log('Number of fixtures found:', fixturesToday.length);
-        console.log("Fixtures found:", fixturesToday);
+        logger.info('Found fixtures for today', {
+            fixtureCount: fixturesToday.length,
+            fixtures: fixturesToday.map(f => ({ id: f.id, home_team: f.home_team, away_team: f.away_team }))
+        });
+        
         if (fixturesToday.length === 0) {
-            console.log('No fixtures found - returning early');
+            logger.info('No fixtures found - returning early');
             const response = {
                 statusCode: 200,
                 body: JSON.stringify({ message: 'No fixtures found' })
             };
-            console.log('Response:', response);
+            logger.info('Returning response', { response });
             return response;
         }
         
-        console.log('Adding fixtures to SQS queue...');
+        logger.info('Adding fixtures to SQS queue');
         await addToSQSQueue(fixturesToday);
-        console.log('Successfully added to SQS queue');
         
         const response = {
             statusCode: 200,
@@ -82,15 +97,16 @@ export const handler = async (event, context) => {
                 count: fixturesToday.length 
             })
         };
-        console.log('Success response:', response);
+        logger.info('Success response', { response });
         return response;
 
     } catch (error) {
-        console.error('Error details:', {
-            message: error.message,
+        logger.error('Handler execution failed', {
+            error: error.message,
             stack: error.stack,
             name: error.name,
-            code: error.code
+            code: error.code,
+            processingTimeMs: Date.now() - startTime
         });
         
         const errorResponse = {
@@ -101,22 +117,24 @@ export const handler = async (event, context) => {
                 code: error.code 
             })
         };
-        console.log('Error response:', errorResponse);
+        logger.info('Error response', { errorResponse });
         return errorResponse;
 
     } finally {
         if (database) {
             try {
-                console.log('Attempting to close database connection...');
+                logger.info('Attempting to close database connection');
                 await database.destroy();
-                console.log('Database connection closed successfully');
+                logger.info('Database connection closed successfully');
             } catch (err) {
-                console.error('Failed to close database connection:', {
-                    message: err.message,
+                logger.error('Failed to close database connection', {
+                    error: err.message,
                     stack: err.stack
                 });
             }
         }
-        console.log('Handler execution completed');
+        logger.info('Handler execution completed', {
+            processingTimeMs: Date.now() - startTime
+        });
     }
 };

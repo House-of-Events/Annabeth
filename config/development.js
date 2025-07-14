@@ -1,4 +1,5 @@
 import { execSync } from 'child_process';
+import Logger from '../lib/logger';
 
 // Get secrets from Chamber
 // In config/development.js
@@ -22,7 +23,7 @@ function getChamberSecrets(service) {
         const value = execSync(`chamber read ${service} ${key} -q`).toString().trim();
         secrets[key] = value;
       } catch (error) {
-        console.error(`Error reading ${key} from ${service}:`, error.message);
+        Logger.error(`Error reading ${key} from ${service}, ${error.message}`);
         process.exit(1);
       }
     });

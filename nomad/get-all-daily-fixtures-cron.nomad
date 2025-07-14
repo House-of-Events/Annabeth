@@ -3,7 +3,7 @@ job "get-all-daily-fixtures-cron" {
   type = "batch"
 
   periodic {
-    crons = ["*/10 * * * *"]  # Run every 10 minutes
+    crons = ["* * * * *"]  # Run every 1 minute
     time_zone = "America/Los_Angeles"
   }
 
@@ -14,7 +14,7 @@ job "get-all-daily-fixtures-cron" {
       driver = "docker"
 
       config {
-        image = "manan78424/get-all-fixtures-daily-from-db:v15"
+        image = "manan78424/get-all-fixtures-daily-from-db:v1"
         command = "node"
         args = [
           "src/workers/route-get-all-daily-fixtures.js"

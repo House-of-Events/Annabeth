@@ -1,5 +1,6 @@
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from '@aws-sdk/client-sqs';
 import config from '../../../config/local.js';
+import logger from '../../../lib/logger.js';
 
 const sqsClient = new SQSClient({
     endpoint: config.AWS_ENDPOINT,
@@ -12,7 +13,11 @@ const sqsClient = new SQSClient({
 });
 
 async function checkSQSQueue() {
-    console.log('Checking SQS queue for messages...');
+    logger.info('Checking SQS queue for messages', {
+        queueUrl: config.SQS_FIXTURES_DAILY_QUEUE_URL,
+        maxMessages: 10,
+        waitTimeSeconds: 5
+    });
     
     try {
         const command = new ReceiveMessageCommand({
@@ -24,24 +29,34 @@ async function checkSQSQueue() {
         const response = await sqsClient.send(command);
         
         if (!response.Messages || response.Messages.length === 0) {
-            console.log('📭 No messages in queue');
+            logger.info('No messages found in queue');
             return;
         }
 
-        console.log(`Found ${response.Messages.length} message(s):`);
+        logger.info('Found messages in queue', {
+            messageCount: response.Messages.length
+        });
         
         for (let i = 0; i < response.Messages.length; i++) {
             const message = response.Messages[i];
-            console.log(`\n--- Message ${i + 1} ---`);
-            console.log(`Message ID: ${message.MessageId}`);
-            console.log(`Receipt Handle: ${message.ReceiptHandle}`);
+            logger.info('Processing message', {
+                messageNumber: i + 1,
+                messageId: message.MessageId,
+                receiptHandle: message.ReceiptHandle
+            });
             
             try {
                 const body = JSON.parse(message.Body);
-                console.log('Message Body:');
-                console.log(JSON.stringify(body, null, 2));
+                logger.info('Message body parsed successfully', {
+                    messageId: message.MessageId,
+                    body: body
+                });
             } catch (error) {
-                console.log('Raw Message Body:', message.Body);
+                logger.warn('Failed to parse message body as JSON', {
+                    messageId: message.MessageId,
+                    rawBody: message.Body,
+                    error: error.message
+                });
             }
             
             // Delete the message after viewing
@@ -51,20 +66,29 @@ async function checkSQSQueue() {
             });
             
             await sqsClient.send(deleteCommand);
-            console.log('✅ Message deleted from queue');
+            logger.info('Message deleted from queue', {
+                messageId: message.MessageId
+            });
         }
         
     } catch (error) {
-        console.error('❌ Error checking SQS queue:', error);
+        logger.error('Error checking SQS queue', {
+            error: error.message,
+            stack: error.stack,
+            queueUrl: config.SQS_FIXTURES_DAILY_QUEUE_URL
+        });
     }
 }
 
 checkSQSQueue()
     .then(() => {
-        console.log('🔍 SQS check completed');
+        logger.info('SQS check completed successfully');
         process.exit(0);
     })
     .catch((error) => {
-        console.error('💥 SQS check failed:', error);
+        logger.error('SQS check failed', {
+            error: error.message,
+            stack: error.stack
+        });
         process.exit(1);
     }); 
